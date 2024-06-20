@@ -1,0 +1,58 @@
+import requests
+
+# Replace with your actual PIA token
+PIA_USERNAME = 'your_pia_username'
+PIA_PASSWORD = 'your_pia_password'
+PIA_REGION = 'desired_region'
+
+# Replace with your qBittorrent Web UI details
+QB_WEB_UI_URL = 'http://localhost:8080/api/v2/app/setPreferences'
+QB_USERNAME = 'admin'
+QB_PASSWORD = 'adminadmin'
+
+def get_pia_port():
+    # Authentication with PIA to get the token
+    auth_response = requests.post('https://privateinternetaccess.com/api/client/v2/login', data={
+        'username': PIA_USERNAME,
+        'password': PIA_PASSWORD
+    })
+    
+    if auth_response.status_code != 200:
+        print('Failed to authenticate with PIA')
+        return None
+
+    auth_data = auth_response.json()
+    pia_token = auth_data['token']
+
+    # Get the port
+    port_response = requests.get(f'https://10.0.0.1:19999/getSignature?token={pia_token}&region={PIA_REGION}', verify=False)
+
+    if port_response.status_code != 200:
+        print('Failed to retrieve port from PIA')
+        return None
+
+    port_data = port_response.json()
+    return port_data.get('port')
+
+def update_qbittorrent_port(port):
+    session = requests.Session()
+    login_payload = {
+        'username': QB_USERNAME,
+        'password': QB_PASSWORD
+    }
+    # Log in to qBittorrent Web UI
+    session.post(f'http://localhost:8080/api/v2/auth/login', data=login_payload)
+
+    # Update port
+    preferences_payload = {
+        'json': f'{{"listen_port":{port}}}'
+    }
+    response = session.post(QB_WEB_UI_URL, data=preferences_payload)
+    if response.status_code == 200:
+        print(f'Successfully updated qBittorrent to use port {port}')
+    else:
+        print('Failed to update qBittorrent port')
+
+vpn_port = get_pia_port()
+if vpn_port:
+    update_qbittorrent_port(vpn_port)
