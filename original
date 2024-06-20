@@ -1,0 +1,98 @@
+mport os
+import time
+import subprocess
+from dotenv import load_dotenv
+
+# Load Transmission credentials from environment file
+load_dotenv('vars.sh')
+trans_user = os.getenv('TRANS_USER')
+trans_pass = os.getenv('TRANS_PASS')
+
+vpn_port_file = '/etc/vpn_port_tracker.conf' #VPN port tracking
+pia_service = 'piavpn.service' # Name of the PIA service
+
+PollTime = 30
+
+def restart_pia_service():
+try:
+# First, try to restart the VPN service using systemctl
+print("Attempting to restart PIA service via systemctl...")
+subprocess.run(["sudo", "systemctl", "restart", "piavpn.service"], check=True)
+print("PIA service restarted successfully via systemctl.")
+except subprocess.CalledProcessError:
+print("Failed to restart PIA service via systemctl, attempting manual reconnect via piactl...")
+try:
+# If systemctl fails, fall back to piactl commands
+subprocess.run(["piactl", "disconnect"], check=True)
+print("PIA disconnected successfully.")
+# Wait for a few seconds to ensure the disconnection process is complete
+time.sleep(5)
+subprocess.run(["piactl", "connect"], check=True)
+print("PIA reconnected successfully via piactl.")
+except subprocess.CalledProcessError:
+print("Failed to reconnect PIA service via piactl.")
+
+# Function to get current VPN port
+def get_vpn_port():
+try:
+output = subprocess.check_output(["piactl", "get", "portforward"]).decode().strip()
+return output if output != "Inactive" else None
+except subprocess.CalledProcessError:
+return None
+
+def check_vpn_connection():
+try:
+output = subprocess.check_output(["piactl", "get", "connectionstate"]).decode().strip()
+if output != "Connected":
+print("VPN is not connected. Attempting to reconnect...")
+restart_pia_service()
+except subprocess.CalledProcessError:
+print("Failed to check VPN connection state.")
+
+# Function to update Transmission port
+def update_transmission_port(port):
+try:
+subprocess.run(["transmission-remote", "-n", f"{trans_user}:{trans_pass}", "-p", str(port)], check=True)
+print(f"Transmission port updated to {port}")
+except subprocess.CalledProcessError:
+print("Failed to update Transmission port")
+
+# Function to update UFW rule
+def update_ufw_rule(port):
+if os.path.exists(vpn_port_file):
+with open(vpn_port_file, 'r') as file:
+old_port = file.read().strip()
+if old_port:
+try:
+subprocess.run(["sudo", "ufw", "delete", "allow", old_port], check=True)
+print(f"Old Port {port} Removed")
+except subprocess.CalledProcessError:
+print("Failed To Remove Old Port")
+
+# Add the new rule and update the file
+try:
+subprocess.run(["sudo", "ufw", "allow", port], check=True)
+print(f"New Port {port} Added")
+except subprocess.CalledProcessError:
+print("Failed To Add New Port")
+with open(vpn_port_file, 'w') as file:
+file.write(port)
+
+def main():
+while True:
+check_vpn_connection()
+vpn_port = get_vpn_port()
+if vpn_port:
+update_transmission_port(vpn_port)
+update_ufw_rule(vpn_port)
+else:
+# Update to a blocked port as a kill switch mechanism
+blocked_port = '70' # Gopher Port is obsolete and rarly used
+update_transmission_port(blocked_port)
+print("VPN is inactive, Transmission updated to use a blocked port")
+restart_pia_service()
+
+time.sleep(PollTime)
+
+if __name__ == "__main__":
+main()gloryhole.py
